@@ -14,7 +14,7 @@ EOF
 
 export DEBIAN_FRONTEND=noninteractive
 export APTARGS="-qq -o=Dpkg::Use-Pty=0"
-export CONSUL=1.4.3
+export CONSUL=$1
 
 apt-get clean ${APTARGS}
 apt-get update ${APTARGS}
@@ -22,14 +22,18 @@ apt-get update ${APTARGS}
 apt-get upgrade -y ${APTARGS}
 apt-get dist-upgrade -y ${APTARGS}
 
-# unzip
+# Installing packages
 echo "Installing packages"
-which unzip &>/dev/null || {
+which unzip jq &>/dev/null || {
 sudo apt-get update -y ${APTARGS}
-sudo apt-get install unzip -y ${APTARGS}
+sudo apt-get install unzip jq -y ${APTARGS}
 }
 
 echo "Installing consul..."
+# Checking Consul latest version if nothing is passed as a variable
+if [ -z "$CONSUL" ]; then
+  CONSUL=`wget -qO-  https://releases.hashicorp.com/consul/index.json | jq -r '.versions[].version' | grep --extended-regexp --invert-match 'ent' | tail -1`
+fi
 # check consul binary
 which consul || {
   pushd /usr/local/bin

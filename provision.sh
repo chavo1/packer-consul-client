@@ -1,6 +1,6 @@
-#!/bin/bash
+#!/usr/bin/env bash
+set -ex
 
-set -x
 mkdir -p /etc/dpkg/dpkg.cfg.d
 cat >/etc/dpkg/dpkg.cfg.d/01_nodoc <<EOF
 path-exclude /usr/share/doc/*
@@ -16,56 +16,63 @@ export DEBIAN_FRONTEND=noninteractive
 export APTARGS="-qq -o=Dpkg::Use-Pty=0"
 export CONSUL=$1
 
+systemctl stop apt-daily.service
+systemctl kill --kill-who=all apt-daily.service
+
+# wait until `apt-get updated` has been killed
+while ! (systemctl list-units --all apt-daily.service | fgrep -q dead)
+do
+  sleep 1;
+done
+
 apt-get clean ${APTARGS}
 apt-get update ${APTARGS}
 
 apt-get upgrade -y ${APTARGS}
 apt-get dist-upgrade -y ${APTARGS}
 
-# Installing packages
+# unzip jq wget
 echo "Installing packages"
-which unzip jq &>/dev/null || {
-sudo apt-get update -y ${APTARGS}
-sudo apt-get install unzip jq -y ${APTARGS}
+which unzip jq wget &>/dev/null || {
+apt-get update -y ${APTARGS}
+apt-get install unzip jq wget -y ${APTARGS}
 }
 
-echo "Installing consul..."
 # Checking Consul latest version if nothing is passed as a variable
 if [ -z "$CONSUL" ]; then
-  CONSUL=`wget -qO-  https://releases.hashicorp.com/consul/index.json | jq -r '.versions[].version' | grep --extended-regexp --invert-match 'ent' | tail -1`
+  CONSUL=`wget -qO-  https://releases.hashicorp.com/consul/index.json | jq -r '.versions[].version' | grep --extended-regexp --invert-match 'ent|beta|rc|alpha' | tail -1`
 fi
 # check consul binary
 which consul || {
+  echo "Installing consul..."
   pushd /usr/local/bin
   [ -f consul_${CONSUL}_linux_amd64.zip ] || {
-    sudo wget https://releases.hashicorp.com/consul/${CONSUL}/consul_${CONSUL}_linux_amd64.zip
+    wget https://releases.hashicorp.com/consul/${CONSUL}/consul_${CONSUL}_linux_amd64.zip
   }
-  sudo unzip consul_${CONSUL}_linux_amd64.zip
-  sudo chmod +x consul
+  unzip consul_${CONSUL}_linux_amd64.zip
+  chmod +x consul
   popd
 }
 
-sudo mkdir -p /etc/consul.d/
-
 # Creating user
-
 echo "Create consul user"
 
-sudo consul -autocomplete-install
+consul -autocomplete-install
 complete -C /usr/local/bin/consul consul
-sudo groupadd --system consul
-sudo useradd -s /sbin/nologin --system -g consul consul
-sudo mkdir -p /opt/consul
-sudo chown -R consul:consul /opt/consul
-sudo chmod -R 775 /opt/consul
-sudo chown -R consul:consul /etc/consul.d/
-sudo chmod -R 775 /etc/consul.d/
-sudo killall consul
+groupadd --system consul
+useradd -s /sbin/nologin --system -g consul consul
+mkdir -p /etc/consul.d/
+mkdir -p /opt/consul
+chown -R consul:consul /opt/consul
+chmod -R 775 /opt/consul
+chown -R consul:consul /etc/consul.d/
+chmod -R 775 /etc/consul.d/
+killall consul
 
 ####################################
 # Consul Server systemd Unit file  #
 ####################################
-sudo cat <<EOF > /etc/systemd/system/consul.service
+cat <<EOF > /etc/systemd/system/consul.service
 ### BEGIN INIT INFO
 # Provides:          consul
 # Required-Start:    $local_fs $remote_fs
@@ -105,7 +112,7 @@ EOF
 ###################
 # Starting Consul #
 ###################
-sudo systemctl daemon-reload
+systemctl daemon-reload
 
 echo "Finished provisioning"
 set +x
